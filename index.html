@@ -1,0 +1,883 @@
+
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Garden Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+    <!-- Thêm Font Awesome để có icon đẹp -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        :root {
+            --primary: #2ecc71; /* Green */
+            --danger: #e74c3c;  /* Red */
+            --warning: #f1c40f; /* Yellow */
+            --dark: #2c3e50;    /* Dark Blue */
+            --light: #ecf0f1;   /* Grey */
+            --card-bg: #ffffff;
+        }
+
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background-color: #f4f7f6; 
+            color: var(--dark);
+            margin: 0; 
+            padding: 20px; 
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        /* Header */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            background: var(--card-bg);
+            padding: 15px 20px;
+            border-radius: 15px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+
+        h2 { margin: 0; font-size: 1.5rem; color: var(--primary); }
+        
+        #connection-status {
+            font-size: 0.9rem;
+            font-weight: bold;
+            padding: 5px 10px;
+            border-radius: 20px;
+            color: white;
+            transition: all 0.3s;
+        }
+        .connected { background-color: var(--primary); box-shadow: 0 0 10px var(--primary); }
+        .disconnected { background-color: var(--danger); }
+
+        /* Grid Layout */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        /* Card Styles */
+        .card { 
+            background: var(--card-bg); 
+            padding: 20px; 
+            border-radius: 15px; 
+            box-shadow: 0 4px 15px rgba(0,0,0,0.05); 
+            transition: transform 0.2s;
+        }
+        .card:hover { transform: translateY(-5px); }
+        
+        .card-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+            border-bottom: 2px solid var(--light);
+            padding-bottom: 10px;
+        }
+        .card-header i { margin-right: 10px; font-size: 1.2rem; color: var(--primary); }
+        .card-header h3 { margin: 0; font-size: 1.1rem; text-transform: uppercase; letter-spacing: 1px; }
+
+        /* --- STATUS AREA --- */
+        .status-display {
+            display: flex;
+            justify-content: space-around;
+            text-align: center;
+        }
+        .status-item { flex: 1; }
+        .big-icon { font-size: 3rem; color: #bdc3c7; transition: color 0.3s; margin-bottom: 5px; }
+        .status-text { font-size: 1.2rem; font-weight: bold; display: block;}
+        .status-sub { font-size: 0.8rem; color: #7f8c8d; }
+
+        /* Animations */
+        .pump-on { color: var(--primary); animation: pulse 1.5s infinite; }
+        .pump-off { color: var(--danger); }
+        .power-on { color: #f39c12; animation: pulse-orange 1.5s infinite; }
+        .power-off { color: #95a5a6; }
+        @keyframes pulse {
+            0% { text-shadow: 0 0 0 rgba(46, 204, 113, 0.4); transform: scale(1); }
+            70% { text-shadow: 0 0 20px rgba(46, 204, 113, 0); transform: scale(1.1); }
+            100% { text-shadow: 0 0 0 rgba(46, 204, 113, 0); transform: scale(1); }
+        }
+        @keyframes pulse-orange {
+            0% { text-shadow: 0 0 0 rgba(243, 156, 18, 0.4); transform: scale(1); }
+            70% { text-shadow: 0 0 20px rgba(243, 156, 18, 0); transform: scale(1.1); }
+            100% { text-shadow: 0 0 0 rgba(243, 156, 18, 0); transform: scale(1); }
+        }
+
+        /* --- CONTROLS AREA --- */
+        /* Toggle Switch for Mode */
+        .switch-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 10px;
+            background: var(--light);
+            border-radius: 10px;
+        }
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+        }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: var(--warning); /* Manual Color */
+            transition: .4s;
+            border-radius: 34px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        input:checked + .slider { background-color: #3498db; /* Auto Color */ }
+        input:checked + .slider:before { transform: translateX(26px); }
+        
+        /* Big Manual Buttons */
+        .manual-controls { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; }
+        .btn-big {
+            padding: 15px;
+            border: none;
+            border-radius: 10px;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            color: white;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            transition: transform 0.1s, box-shadow 0.2s;
+        }
+        .btn-big:active { transform: scale(0.95); }
+        .btn-start { background: linear-gradient(145deg, #2ecc71, #27ae60); box-shadow: 0 4px #219150; }
+        .btn-stop { background: linear-gradient(145deg, #e74c3c, #c0392b); box-shadow: 0 4px #96281b; }
+        .btn-power { background: linear-gradient(145deg, #f39c12, #d35400); box-shadow: 0 4px #e67e22; }
+        .btn-reset { background: var(--dark); grid-column: span 2; margin-top: 10px; }
+        .disabled { opacity: 0.5; pointer-events: none; filter: grayscale(100%); }
+
+        /* MANUAL VALVE GRID */
+        .manual-valve-grid {
+            display: grid;
+            /* Giảm số cột xuống để ô to hơn */
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        
+        /* Valve Wrapper Card */
+        .valve-wrapper {
+            background: #fff; border: 1px solid #e0e0e0; border-radius: 10px;
+            padding: 20px; display: flex; align-items: center; justify-content: space-between;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        }
+        .valve-label { font-weight: bold; font-size: 1.2rem; color: var(--dark); }
+        .valve-status-group { display: flex; align-items: center; gap: 10px; }
+
+        /* LED Indicator */
+        .led {
+            width: 12px; height: 12px; border-radius: 50%;
+            background-color: #bdc3c7; /* OFF */
+            box-shadow: inset 0 1px 2px rgba(0,0,0,0.2);
+            transition: all 0.3s;
+        }
+        .led.on {
+            background-color: var(--primary); /* ON */
+            box-shadow: 0 0 8px var(--primary), inset 0 1px 2px rgba(0,0,0,0.2);
+        }
+
+        /* Small Toggle Switch */
+        .switch-sm { position: relative; display: inline-block; width: 60px; height: 34px; }
+        .switch-sm input { opacity: 0; width: 0; height: 0; }
+        .slider-sm {
+            position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #ccc; transition: .4s; border-radius: 34px;
+        }
+        .slider-sm:before {
+            position: absolute; content: ""; height: 26px; width: 26px; left: 4px; bottom: 4px;
+            background-color: white; transition: .4s; border-radius: 50%;
+        }
+        input:checked + .slider-sm { background-color: var(--primary); }
+        input:checked + .slider-sm:before { transform: translateX(26px); }
+
+        /* NOTIFICATION & LOG */
+        .notification-area { position: relative; cursor: pointer; margin-right: 15px; color: var(--dark); }
+        .badge {
+            position: absolute; top: -8px; right: -8px;
+            padding: 4px 6px; border-radius: 50%;
+            background-color: var(--danger); color: white;
+            font-size: 0.7rem; font-weight: bold;
+            display: none; /* Ẩn khi không có lỗi */
+            border: 2px solid white;
+        }
+        #log-panel {
+            display: none;
+            position: absolute; top: 60px; right: 20px;
+            width: 320px; max-height: 400px; overflow-y: auto;
+            background: white; border: 1px solid #ddd; border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2); z-index: 1500;
+            padding: 15px;
+            transition: all 0.3s;
+        }
+        #log-panel.expanded {
+            width: 80%; height: 80%; max-height: 80%;
+            top: 10%; left: 10%; right: auto;
+            box-shadow: 0 0 50px rgba(0,0,0,0.5);
+        }
+        #log-panel h3 { margin-top: 0; font-size: 1rem; border-bottom: 1px solid #eee; padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+        .log-item { padding: 10px 0; border-bottom: 1px solid #f1f1f1; font-size: 0.9rem; color: #333; }
+        .log-time { font-size: 0.75rem; color: #888; display: block; margin-bottom: 2px; }
+        .log-msg { color: var(--danger); font-weight: bold; }
+        .log-resolved .log-msg { color: var(--primary); text-decoration: none; }
+        .btn-confirm-fix {
+            margin-top: 5px; padding: 4px 8px; font-size: 0.8rem;
+            background-color: var(--warning); border: none; border-radius: 4px; color: #333; cursor: pointer;
+        }
+        .btn-confirm-fix:hover { background-color: #e67e22; color: white; }
+        .log-resolved .btn-confirm-fix { display: none; }
+        .expand-icon { cursor: pointer; color: #7f8c8d; }
+        .expand-icon:hover { color: var(--dark); }
+
+        /* EMERGENCY OVERLAY */
+        #alert-overlay {
+            display: none;
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(220, 53, 69, 0.95);
+            z-index: 2000;
+            flex-direction: column; justify-content: center; align-items: center;
+            color: white; text-align: center;
+        }
+        .alert-box { animation: blink 0.8s infinite; }
+        @keyframes blink { 50% { opacity: 0.6; transform: scale(1.05); } }
+
+        /* --- SETTINGS AREA --- */
+        .input-group { margin-bottom: 15px; }
+        .input-group label { display: block; margin-bottom: 5px; font-weight: 600; font-size: 0.9rem;}
+        .input-row { display: flex; gap: 10px; }
+        input[type="time"] { 
+            flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 8px; 
+            font-family: inherit; font-size: 1rem;
+        }
+        button.btn-save {
+            padding: 10px 15px; background: var(--primary); color: white; border: none; 
+            border-radius: 8px; cursor: pointer;
+        }
+
+        .valve-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr); /* 4 cột */
+            gap: 8px;
+        }
+        .valve-input-wrap {
+            position: relative;
+        }
+        .valve-input-wrap input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            text-align: center;
+            box-sizing: border-box; 
+        }
+        .valve-input-wrap span {
+            position: absolute;
+            top: -6px; left: 5px;
+            background: white;
+            padding: 0 2px;
+            font-size: 0.7rem;
+            color: #7f8c8d;
+        }
+        .btn-full { width: 100%; margin-top: 15px; padding: 12px; font-size: 1rem; background-color: #3498db; }
+        
+        /* --- Responsive Design --- */
+        @media (max-width: 980px) { /* Breakpoint khi layout có thể chuyển thành 2 cột */
+            /* Reset style inline buộc card cấu hình van chiếm toàn bộ chiều rộng.
+               Trên màn hình nhỏ hơn, nó sẽ hoạt động như một card bình thường, tránh các khoảng trống không mong muốn. */
+            .card[style*="grid-column"] {
+                grid-column: auto !important;
+            }
+        }
+
+        @media (max-width: 768px) { /* Dành cho máy tính bảng và nhỏ hơn */
+            header {
+                flex-direction: column;
+                gap: 15px;
+                text-align: center;
+            }
+
+            h2 {
+                font-size: 1.3rem;
+            }
+
+            .valve-grid {
+                /* 3 cột trên máy tính bảng */
+                grid-template-columns: repeat(3, 1fr);
+            }
+        }
+
+        @media (max-width: 480px) { /* Dành cho điện thoại */
+            body {
+                padding: 10px;
+            }
+
+            .valve-grid {
+                /* 2 cột trên điện thoại */
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- EMERGENCY ALERT -->
+    <div id="alert-overlay">
+        <div class="alert-box">
+            <i class="fas fa-exclamation-triangle fa-5x"></i>
+            <h1>LỖI ÁP SUẤT CAO!</h1>
+            <p>Hệ thống đã dừng khẩn cấp để bảo vệ đường ống.</p>
+            <button class="btn-big" style="background: white; color: #dc3545; margin-top:20px;" onclick="confirmReset()">MỞ KHÓA & RESET</button>
+            <button class="btn-big" style="background: transparent; border: 1px solid white; font-size: 0.9rem; margin-top:10px;" onclick="closeOverlay()">Đóng (Xem lại sau)</button>
+        </div>
+    </div>
+
+    <!-- LOG PANEL -->
+    <div id="log-panel">
+        <h3><span><i class="fas fa-history"></i> Nhật Ký Lỗi</span> <i class="fas fa-expand expand-icon" onclick="toggleExpandLog()" title="Phóng to/Thu nhỏ"></i></h3>
+        <div id="log-list">
+            <div style="text-align:center; color:#999; padding:20px;">Chưa có lỗi nào</div>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <h2><i class="fas fa-seedling"></i> SCADA ĐIỀU KHIỂN GIÁM SÁT HỆ THỐNG TƯỚI TIÊU</h2>
+            <div style="display: flex; align-items: center; gap: 15px;">
+                <!-- Bell Icon -->
+                <div class="notification-area" onclick="toggleLog()">
+                    <i class="fas fa-bell fa-lg"></i>
+                    <span id="error-badge" class="badge">0</span>
+                </div>
+                <div id="sys-time" style="font-weight: bold; font-size: 1.1rem; color: var(--dark);"><i class="far fa-clock"></i> --:--:--</div>
+                <div id="connection-status" class="disconnected"><i class="fas fa-wifi"></i> Connecting...</div>
+            </div>
+        </header>
+
+        <div class="dashboard-grid">
+            
+            <!-- KHU VỰC 1: TRẠNG THÁI -->
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-chart-line"></i>
+                    <h3>Giám Sát</h3>
+                </div>
+                <div class="status-display">
+                    <div class="status-item">
+                        <i id="iconPower" class="fas fa-bolt big-icon"></i>
+                        <span class="status-text" id="lblPower">OFF</span>
+                        <span class="status-sub">Nguồn</span>
+                    </div>
+                    <div class="status-item">
+                        <i id="iconPump" class="fas fa-water big-icon"></i>
+                        <span class="status-text" id="lblPump">OFF</span>
+                        <span class="status-sub">Máy Bơm</span>
+                    </div>
+                    <div class="status-item">
+                        <i id="iconValve" class="fas fa-sync-alt big-icon"></i>
+                        <span class="status-text" id="lblValve">--</span>
+                        <span class="status-sub">Van Số</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- KHU VỰC 2: ĐIỀU KHIỂN -->
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-gamepad"></i>
+                    <h3>Điều Khiển</h3>
+                </div>
+
+                <!-- Mode Switch -->
+                <div class="switch-container">
+                    <span style="font-weight:bold; color:var(--warning)">THỦ CÔNG</span>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="modeSwitch" onchange="toggleMode()">
+                        <span class="slider"></span>
+                    </label>
+                    <span style="font-weight:bold; color:#3498db">TỰ ĐỘNG</span>
+                </div>
+
+                <!-- Manual Buttons -->
+                <div id="manualPanel" class="manual-controls">
+                    <button class="btn-big btn-start" onclick="sendMqtt('farm/manual', 'on')">
+                        <i class="fas fa-power-off fa-2x"></i><br>BẬT BƠM
+                    </button>
+                    <button class="btn-big btn-stop" onclick="sendMqtt('farm/manual', 'off')"> <!-- Bỏ grid-column: span 2 cũ nếu có -->
+                        <i class="fas fa-stop-circle fa-2x"></i><br>TẮT BƠM
+                    </button>
+                    <button id="mainResetBtn" class="btn-big btn-reset disabled" style="grid-column: span 1;" onclick="sendMqtt('farm/reset', '1')">
+                        <i class="fas fa-redo"></i> RESET HỆ THỐNG
+                    </button>
+                    <button class="btn-big" style="background: #1b03f0; grid-column: span 2; margin-top: 10px;" onclick="if(confirm('Bạn có chắc muốn khởi động lại thiết bị (Reboot)?')) sendMqtt('farm/reboot', '1')">
+                        <i class="fas fa-sync"></i> KHỞI ĐỘNG LẠI (REBOOT)
+                    </button>
+                </div>
+            </div>
+
+            <!-- KHU VỰC 3: CÀI ĐẶT LỊCH -->
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-clock"></i>
+                    <h3>Hẹn Giờ</h3>
+                </div>
+                
+                <div class="input-group">
+                    <label>Lịch Sáng & Chiều:</label>
+                    <div class="input-row">
+                        <input type="time" id="timeMorning" value="05:00">
+                        <button class="btn-save" onclick="setSchedule('morning')"><i class="fas fa-save"></i></button>
+                    </div>
+                    <div class="input-row" style="margin-top:5px;">
+                        <input type="time" id="timeEvening" value="16:00">
+                        <button class="btn-save" onclick="setSchedule('evening')"><i class="fas fa-save"></i></button>
+                    </div>
+                </div>
+
+                <button class="btn-save btn-full" style="background-color: var(--dark);" onclick="syncTime()">
+                    <i class="fas fa-mobile-alt"></i> Đồng bộ giờ từ ĐT
+                </button>
+            </div>
+
+            <!-- KHU VỰC 5: CẤU HÌNH WIFI -->
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-wifi"></i>
+                    <h3>Cấu Hình WiFi</h3>
+                </div>
+                <div class="input-group">
+                    <label>Tên WiFi (SSID):</label>
+                    <input type="text" id="wifiSSID" placeholder="Nhập SSID" style="width:100%; padding:10px; border-radius:8px; border:1px solid #ddd; box-sizing:border-box;">
+                </div>
+                <div class="input-group">
+                    <label>Mật khẩu:</label>
+                    <input type="password" id="wifiPass" placeholder="Nhập Password" style="width:100%; padding:10px; border-radius:8px; border:1px solid #ddd; box-sizing:border-box;">
+                </div>
+                <button class="btn-save btn-full" style="background-color: var(--warning); color: #333;" onclick="saveWifi()">
+                    <i class="fas fa-network-wired"></i> CẬP NHẬT WIFI 
+                </button>
+            </div>
+
+            <!-- KHU VỰC 4: THỜI GIAN VAN -->
+            <div class="card" style="grid-column: 1 / -1;">
+                <div class="card-header">
+                    <i class="fas fa-hourglass-half"></i>
+                    <h3>Thời Lượng Tưới (Phút)</h3>
+                </div>
+                <div class="valve-grid" id="valveContainer">
+                    <!-- JS Render -->
+                </div>
+                <button class="btn-save btn-full" onclick="saveValveTimes()">LƯU CẤU HÌNH VAN</button>
+                
+                <hr style="margin: 20px 0; border: 0; border-top: 1px solid #eee;">
+                
+                <div class="card-header"><i class="fas fa-hand-pointer"></i><h3>Điều Khiển Van Thủ Công (Mode: Manual)</h3></div>
+                <div class="manual-valve-grid" id="manualValveGrid">
+                    <!-- JS sẽ tạo 12 nút bấm ở đây -->
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        // --- CẤU HÌNH MQTT ---
+        const mqttHost = "5679b03bbec1493389041ddfe40813f7.s1.eu.hivemq.cloud"; 
+        const mqttPort = 8884; 
+        const mqttUser = "TUBOM1";
+        const mqttPass = "Doanquang2003@";
+        
+        let client = new Paho.MQTT.Client(mqttHost, mqttPort, "web_client_" + new Date().getTime());
+
+        // --- BIẾN TOÀN CỤC CHO ĐỒNG HỒ ---
+        let sysHour = 0, sysMinute = 0, sysSecond = 0;
+        let timeIsSynced = false;
+        let clockInterval = null;
+        let errorCount = 0;
+        let lastLockState = 0;
+        let initDataLoaded = false; // Cờ đánh dấu đã load dữ liệu ban đầu
+
+
+        // --- TẠO 12 Ô NHẬP LIỆU CHO VAN ---
+        const valveContainer = document.getElementById("valveContainer");
+        for(let i=1; i<=12; i++){
+            let div = document.createElement("div");
+            div.className = "valve-input-wrap";
+            div.innerHTML = `<span>V${i}</span><input type="number" id="v${i}" value="1" min="1">`;
+            valveContainer.appendChild(div);
+        }
+
+        // --- TẠO 12 NÚT BẤM THỦ CÔNG ---
+        const manualGrid = document.getElementById("manualValveGrid");
+        for(let i=1; i<=12; i++){
+            let wrapper = document.createElement("div");
+            wrapper.className = "valve-wrapper";
+            
+            // Label
+            let label = document.createElement("span");
+            label.className = "valve-label";
+            label.innerText = "VAN " + i;
+            
+            // Group: LED + Switch
+            let group = document.createElement("div");
+            group.className = "valve-status-group";
+            
+            // LED
+            let led = document.createElement("div");
+            led.className = "led";
+            led.id = "ledV" + i;
+            
+            // Switch
+            let lblSwitch = document.createElement("label");
+            lblSwitch.className = "switch-sm";
+            lblSwitch.innerHTML = `<input type="checkbox" id="swV${i}" onclick="toggleValveManual(${i})"><span class="slider-sm"></span>`;
+            
+            group.appendChild(led);
+            group.appendChild(lblSwitch);
+            
+            wrapper.appendChild(label);
+            wrapper.appendChild(group);
+            manualGrid.appendChild(wrapper);
+        }
+
+        function toggleValveManual(id) {
+            let chk = document.getElementById("swV" + id);
+            let cmd = chk.checked ? "1" : "0";
+            sendMqtt("farm/valve_control", id + "_" + cmd);
+        }
+
+        // --- MQTT LOGIC ---
+        client.onConnectionLost = function(responseObject) {
+            document.getElementById("connection-status").innerHTML = '<i class="fas fa-exclamation-triangle"></i> Mất kết nối';
+            document.getElementById("connection-status").className = "disconnected";
+            setTimeout(connectMQTT, 5000); // Tự kết nối lại
+        };
+
+        client.onMessageArrived = function(message) {
+            console.log("Nhận tin:", message.destinationName, message.payloadString);
+            if(message.destinationName === "farm/status"){
+                try {
+                    // JSON: {..., "mTime":"06:00", "eTime":"17:00", "valves":[1,1,...]}
+                    let data = JSON.parse(message.payloadString);
+                    
+                    // Cập nhật và đồng bộ giờ hệ thống
+                    if (data.time) {
+                        let timeParts = data.time.split(':');
+                        if (timeParts.length === 3) {
+                            sysHour = parseInt(timeParts[0], 10);
+                            sysMinute = parseInt(timeParts[1], 10);
+                            sysSecond = parseInt(timeParts[2], 10);
+                            
+                            // Nếu đồng hồ chưa chạy, hãy khởi động nó
+                            if (!timeIsSynced) {
+                                startClientClock();
+                                timeIsSynced = true;
+                            }
+                        }
+                    }
+
+                    // Cập nhật trạng thái Nguồn (Icon Giám Sát)
+                    let iconPower = document.getElementById("iconPower");
+                    let lblPowerStatus = document.getElementById("lblPower");
+                    if(data.power == 1){
+                        lblPowerStatus.innerText = "ON";
+                        lblPowerStatus.style.color = "#f39c12";
+                        iconPower.className = "fas fa-bolt big-icon power-on";
+                    } else {
+                        lblPowerStatus.innerText = "OFF";
+                        lblPowerStatus.style.color = "#95a5a6";
+                        iconPower.className = "fas fa-bolt big-icon power-off";
+                    }
+
+                    // Cập nhật trạng thái Bơm
+                    let iconPump = document.getElementById("iconPump");
+                    let lblPump = document.getElementById("lblPump");
+                    if(data.pump == 1){
+                        lblPump.innerText = "RUNNING";
+                        lblPump.style.color = "var(--primary)";
+                        iconPump.className = "fas fa-water big-icon pump-on";
+                    } else {
+                        lblPump.innerText = "STOPPED";
+                        lblPump.style.color = "var(--danger)";
+                        iconPump.className = "fas fa-water big-icon pump-off";
+                    }
+                    
+
+                    // Cập nhật Van
+                    document.getElementById("lblValve").innerText = (data.valve == 0) ? "Không" : "Số " + data.valve;
+                    
+                    // Cập nhật Mode Switch
+                    // Mode 1 = Auto, Mode 0 = Manual
+                    document.getElementById("modeSwitch").checked = (data.mode == 1);
+
+                    // --- CẬP NHẬT CÀI ĐẶT (Chỉ cập nhật nếu người dùng không đang nhập liệu) ---
+                    let activeId = document.activeElement ? document.activeElement.id : "";
+
+                    // 1. Cập nhật Lịch Sáng/Chiều
+                    if(data.mTime && activeId !== "timeMorning") {
+                        document.getElementById("timeMorning").value = data.mTime;
+                    }
+                    if(data.eTime && activeId !== "timeEvening") {
+                        document.getElementById("timeEvening").value = data.eTime;
+                    }
+
+                    // 2. Cập nhật Thời gian Van
+                    if(data.valves && Array.isArray(data.valves)){
+                        for(let i=0; i<data.valves.length; i++){
+                            let elId = "v" + (i+1);
+                            if(activeId !== elId){
+                                document.getElementById(elId).value = data.valves[i];
+                            }
+                        }
+                    }
+
+                    // Cập nhật trạng thái các nút van thủ công (Đèn hiển thị)
+                    if(data.vStatus && Array.isArray(data.vStatus)){
+                        for(let i=0; i<data.vStatus.length; i++){
+                            // Update LED
+                            let led = document.getElementById("ledV" + (i+1));
+                            if(data.vStatus[i] == 1) led.classList.add("on"); else led.classList.remove("on");
+                            
+                            // Update Switch State
+                            let sw = document.getElementById("swV" + (i+1));
+                            sw.checked = (data.vStatus[i] == 1);
+                        }
+                    }
+
+                    // --- XỬ LÝ LỖI & LOG ---
+                    let mainResetBtn = document.getElementById("mainResetBtn");
+                    
+                    if (data.lock == 1) {
+                        // Cho phép bấm nút Reset
+                        mainResetBtn.classList.remove("disabled");
+                        
+                        // Nếu phát hiện lỗi mới (chuyển từ 0 -> 1) hoặc mới load trang mà thấy lỗi
+                        if (lastLockState == 0) {
+                            handleNewError("Cảnh báo: Áp suất cao (GPIO4)");
+                        }
+                    } else {
+                        // Hệ thống bình thường -> Disable nút Reset
+                        mainResetBtn.classList.add("disabled");
+                        // Xóa cờ đã hiển thị để lần sau lỗi lại hiện tiếp
+                        sessionStorage.removeItem("errorShown");
+                    }
+                    lastLockState = data.lock;
+
+                    // Disable nút bấm thủ công nếu đang Auto
+                    let manualPanel = document.getElementById("manualPanel");
+                    let manualGridDiv = document.getElementById("manualValveGrid");
+                    if(data.mode == 1) {
+                        manualPanel.classList.add("disabled");
+                        manualGridDiv.classList.add("disabled"); // Khóa luôn các nút van lẻ
+                    } else {
+                        manualPanel.classList.remove("disabled");
+                        manualGridDiv.classList.remove("disabled");
+                    }
+
+                } catch(e) { console.error(e); }
+            } else if (message.destinationName === "farm/error") {
+                // Nhận thông báo lỗi cụ thể (ví dụ: Timeout)
+                handleNewError(message.payloadString);
+            }
+        };
+
+        function connectMQTT(){
+            client.connect({
+                useSSL: true,
+                userName: mqttUser,
+                password: mqttPass,
+                onSuccess: function() {
+                    document.getElementById("connection-status").innerHTML = '<i class="fas fa-check-circle"></i> Đã kết nối';
+                    document.getElementById("connection-status").className = "connected";
+                    client.subscribe("farm/status");
+                    client.subscribe("farm/error");
+                },
+                onFailure: function(msg) {
+                    document.getElementById("connection-status").innerHTML = "Lỗi: " + msg.errorMessage;
+                }
+            });
+        }
+
+        function sendMqtt(topic, payload){
+            if(!client.isConnected()) { alert("Chưa kết nối MQTT!"); return; }
+            let message = new Paho.MQTT.Message(payload);
+            message.destinationName = topic;
+            client.send(message);
+            console.log("Gửi:", topic, payload);
+        }
+
+        // --- CÁC HÀM ĐIỀU KHIỂN ---
+        // --- CÁC HÀM ĐỒNG HỒ ---
+        function startClientClock() {
+            if (clockInterval) clearInterval(clockInterval); // Xóa timer cũ nếu có
+            clockInterval = setInterval(updateClock, 1000);
+        }
+
+        function updateClock() {
+            if (!timeIsSynced) return; // Không chạy nếu chưa nhận được giờ từ ESP32
+
+            // Tăng giây và xử lý tràn số
+            sysSecond++;
+            if (sysSecond >= 60) {
+                sysSecond = 0;
+                sysMinute++;
+                if (sysMinute >= 60) {
+                    sysMinute = 0;
+                    sysHour++;
+                    if (sysHour >= 24) { sysHour = 0; }
+                }
+            }
+            // Định dạng và hiển thị
+            const pad = (num) => num.toString().padStart(2, '0');
+            document.getElementById("sys-time").innerHTML = `<i class="far fa-clock"></i> ${pad(sysHour)}:${pad(sysMinute)}:${pad(sysSecond)}`;
+        }
+
+        function toggleExpandLog() {
+            document.getElementById("log-panel").classList.toggle("expanded");
+        }
+
+        function confirmFix(btn) {
+            // Tìm phần tử cha là .log-item
+            let item = btn.parentElement;
+            item.classList.add("log-resolved");
+            
+            // Cập nhật giao diện dòng log
+            let msgSpan = item.querySelector(".log-msg");
+            msgSpan.innerHTML = '<i class="fas fa-check"></i> Đã khắc phục';
+            
+            // Giảm số lượng lỗi trên chuông
+            if(errorCount > 0) errorCount--;
+            let badge = document.getElementById("error-badge");
+            badge.innerText = errorCount;
+            if(errorCount === 0) badge.style.display = "none";
+        }
+
+        // --- CÁC HÀM XỬ LÝ LOG & LỖI ---
+        function handleNewError(msgContent) {
+            errorCount++;
+            
+            // Cập nhật Badge
+            let badge = document.getElementById("error-badge");
+            badge.innerText = errorCount;
+            badge.style.display = "block";
+
+            // Thêm vào Log
+            let logList = document.getElementById("log-list");
+            let now = new Date().toLocaleTimeString();
+            let newItem = `
+                <div class="log-item">
+                    <span class="log-time">${now}</span>
+                    <span class="log-msg">${msgContent}</span><br>
+                    <button class="btn-confirm-fix" onclick="confirmFix(this)">Xác nhận đã sửa</button>
+                </div>`;
+            
+            // Xóa dòng "Chưa có lỗi" nếu có
+            if(logList.innerHTML.includes("Chưa có lỗi")) logList.innerHTML = "";
+            logList.innerHTML = newItem + logList.innerHTML;
+
+            // Hiện Overlay (Chỉ 1 lần mỗi phiên làm việc/mỗi lần lỗi)
+            if (!sessionStorage.getItem("errorShown")) {
+                document.getElementById("alert-overlay").style.display = "flex";
+                sessionStorage.setItem("errorShown", "true");
+            }
+        }
+
+        function toggleLog() {
+            let p = document.getElementById("log-panel");
+            p.style.display = (p.style.display === "block") ? "none" : "block";
+        }
+
+        function closeOverlay() {
+            document.getElementById("alert-overlay").style.display = "none";
+        }
+
+        function confirmReset() {
+            sendMqtt('farm/reset', '1');
+            closeOverlay();
+        }
+
+        // 0. Toggle Mode
+        function toggleMode(){
+            let isAuto = document.getElementById("modeSwitch").checked;
+            let val = isAuto ? "auto" : "manual";
+            sendMqtt("farm/mode", val);
+            
+            // Giao diện sẽ được cập nhật khi nhận phản hồi từ MQTT status
+        }
+
+        // 1. Đồng bộ giờ
+        function syncTime(){
+            let d = new Date();
+            let json = JSON.stringify({
+                hour: d.getHours(),
+                minute: d.getMinutes(),
+                second: d.getSeconds()
+            });
+            sendMqtt("farm/set_rtc", json);
+            alert("Đã gửi lệnh cập nhật giờ: " + d.toLocaleTimeString());
+        }
+
+        // 2. Cài đặt giờ sáng/chiều
+        function setSchedule(type){
+            let timeVal = "";
+            if(type == 'morning') timeVal = document.getElementById("timeMorning").value;
+            else timeVal = document.getElementById("timeEvening").value;
+
+            if(!timeVal) return;
+            sendMqtt("farm/" + type, timeVal);
+            // Hiệu ứng nhỏ báo đã lưu
+            alert("Đã lưu lịch " + (type=='morning'?'Sáng':'Chiều'));
+        }
+
+        // 3. Cài đặt thời gian van
+        function saveValveTimes(){
+            let times = [];
+            for(let i=1; i<=12; i++){
+                let val = document.getElementById("v"+i).value;
+                times.push(val);
+            }
+            sendMqtt("farm/valves", times.join(","));
+            alert("Đã gửi thời gian tưới cho 12 van!");
+        }
+
+        // 4. Lưu cấu hình WiFi
+        function saveWifi() {
+            let ssid = document.getElementById("wifiSSID").value;
+            let pass = document.getElementById("wifiPass").value;
+            if(!ssid) { alert("Vui lòng nhập SSID!"); return; }
+            if(confirm("Thiết bị sẽ khởi động lại để kết nối WiFi mới. Tiếp tục?")) {
+                sendMqtt("farm/wifi/config", ssid + "|" + pass);
+            }
+        }
+
+        // Start
+        connectMQTT();
+    </script>
+</body>
+</html>
